@@ -1,0 +1,44 @@
+version: '3'
+
+services:
+
+  temperature:
+    image: pluspeterpublic/temperature:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    restart: unless-stopped
+    expose:
+      - 8000
+
+  windspeed:
+    image: pluspeterpublic/windspeed:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+    expose:
+      - 8080  
+
+  redis:
+    image: "redis:alpine"
+
+  weather:
+    build: 
+      context: './weather'
+      dockerfile: Dockerfile
+    volumes:
+      - ./weather:/usr/src/app   
+    links:
+      - "temperature:temperature"
+      - "windspeed:windspeed"
+    ports:
+      - "5000:80"
+    depends_on:
+      - temperature
+      - windspeed
+    environment:
+      - PORT=80
+    restart: unless-stopped
