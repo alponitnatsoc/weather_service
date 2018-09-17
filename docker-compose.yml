@@ -39,6 +39,7 @@ services:
     depends_on:
       - temperature
       - windspeed
+      - redis
     environment:
       - PORT=80
     restart: unless-stopped
