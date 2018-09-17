@@ -13,5 +13,3 @@ COPY . /usr/src/app
 
 # run server
 CMD ["python","app.py"]
-
-RUN curl "http://localhost:5000/weather"

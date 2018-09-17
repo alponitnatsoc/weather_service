@@ -30,7 +30,7 @@ def daterange(start_date, end_date):
     for n in range(int ((end_date - start_date).days + 1)):
         yield start_date + timedelta(n)
 
-# calls the specific service for all the dates in the range
+# calls the specific service for all the dates in the range and retrieves the data
 def get_data(start_date,end_date,type):
     data = []
     for single_date in daterange(start_date, end_date):
@@ -79,8 +79,8 @@ def get_data(start_date,end_date,type):
                     raise exc
                 retries -= 1
                 time.sleep(0.5)
-            except:
-                ermsg = "Unexpected error: " + sys.exc_info()[0]
+            except Exception as e:
+                ermsg = "Unexpected error: " + str(e)
                 return jsonify({'error':ermsg})
         if type == 'temps':
             data.append({'temp':temp,'date':iso_date})
@@ -95,12 +95,19 @@ def start_service(start_date_str, end_date_str, type):
     #checking start_date and end_date are defined
     if start_date_str == '' or end_date_str == '':
         return jsonify({'error':'missing parameter in request.(start & end parameters must be defined in the request)'})
+    
     today_date_str = date.today().isoformat() + 'T00:00:00Z'
     smallest_date_str = "1900-01-01T00:00:00Z"
-    smallest_date = dateutil.parser.parse(smallest_date_str)
-    start_date = dateutil.parser.parse(start_date_str)
-    end_date = dateutil.parser.parse(end_date_str)
-    today_date = dateutil.parser.parse(today_date_str)
+    
+    try:
+        smallest_date = dateutil.parser.parse(smallest_date_str)
+        start_date = dateutil.parser.parse(start_date_str)
+        end_date = dateutil.parser.parse(end_date_str)
+        today_date = dateutil.parser.parse(today_date_str)
+    except Exception as e:
+        ermsg = "Error while parsing dates: " + str(e)
+        return jsonify({'error':ermsg})
+    
     #checking start_date is greater than the smallest date
     if smallest_date > start_date:
         return jsonify({'error':'start date is older than jan 01 1900'})
