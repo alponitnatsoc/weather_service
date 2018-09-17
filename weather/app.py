@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, date
 import dateutil.parser
 
 import redis
+import re
 
 # Create an instance of Flask
 app = Flask(__name__)
@@ -24,6 +25,11 @@ cache = redis.Redis(host='redis', port=6379)
 temperatureList = "temperatures"
 northSpeedList = 'northSpeeds'
 westSpeedList = 'westSpeeds'
+
+def fecth_date(str):
+    if re.match(r'\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z',str):
+        return True
+    return False
 
 #loop between date range inclusive
 def daterange(start_date, end_date):
@@ -100,9 +106,9 @@ def start_service(start_date_str, end_date_str, type):
     smallest_date_str = "1900-01-01T00:00:00Z"
     
     try:
-        smallest_date = dateutil.parser.parse(smallest_date_str)
         start_date = dateutil.parser.parse(start_date_str)
         end_date = dateutil.parser.parse(end_date_str)
+        smallest_date = dateutil.parser.parse(smallest_date_str)
         today_date = dateutil.parser.parse(today_date_str)
     except Exception as e:
         ermsg = "Error while parsing dates: " + str(e)
@@ -129,19 +135,25 @@ class Temperatures(Resource):
     def get(self):
         start_date_str = request.args.get('start','')
         end_date_str = request.args.get('end','')
-        return start_service(start_date_str,end_date_str,'temps')
+        if fecth_date(start_date_str) and fecth_date(end_date_str):
+            return start_service(start_date_str,end_date_str,'temps')
+        return jsonify({'error':'each date must be in ISO8601 format'})
 
 class Speeds(Resource):
     def get(self):
         start_date_str = request.args.get('start','')
         end_date_str = request.args.get('end','')
-        return start_service(start_date_str,end_date_str,'speeds')
+        if fecth_date(start_date_str) and fecth_date(end_date_str):
+            return start_service(start_date_str,end_date_str,'speeds')
+        return jsonify({'error':'each date must be in ISO8601 format'})
 
 class Weather(Resource):
     def get(self):
         start_date_str = request.args.get('start','')
         end_date_str = request.args.get('end','')
-        return start_service(start_date_str,end_date_str,'both')
+        if fecth_date(start_date_str) and fecth_date(end_date_str):
+            return start_service(start_date_str,end_date_str,'both')
+        return jsonify({'error':'each date must be in ISO8601 format'})
 
 api.add_resource(Temperatures, '/temperatures')
 api.add_resource(Speeds, '/speeds')
