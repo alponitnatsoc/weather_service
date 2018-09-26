@@ -39,3 +39,12 @@ services:
     environment:
       - PORT=80
     restart: unless-stopped
+
+  sut:
+    build:
+      context: './weather'
+      dockerfile: Dockerfile.test
+    depends_on:
+      - weather
+    links:
+      - weather

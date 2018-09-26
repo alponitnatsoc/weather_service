@@ -1,4 +1,3 @@
-
 import time
 
 # Import the framework
@@ -9,11 +8,13 @@ import requests
 import json
 
 #import datetime to parse dates in ISO format
-from datetime import datetime, timedelta, date
+from datetime import datetime, date
 import dateutil.parser
 
 import redis
-import re
+
+from dateCouple import DateCouple
+from dataSet import DataSet
 
 # Create an instance of Flask
 app = Flask(__name__)
@@ -21,15 +22,15 @@ app = Flask(__name__)
 # Create the API
 api = Api(app)
 
-cache = redis.Redis(host='redis', port=6379)
-temperatureList = "temperatures"
-northSpeedList = 'northSpeeds'
-westSpeedList = 'westSpeeds'
+REDIS_PORT = 6379
+TEMPERATURE_SERVICE = 'http://temperature:8000/?at='
+WINDSPEEDS_SERVICE = 'http://windspeed:8080/?at='
+TEMPERATURES = "temperatures"
+NORTH_SPEEDS = 'northSpeeds'
+WEST_SPEEDS = 'westSpeeds'
 
-def fecth_date(str):
-    if re.match(r'\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z',str):
-        return True
-    return False
+cache = redis.Redis(host='redis', port=REDIS_PORT)
+
 
 #loop between date range inclusive
 def daterange(start_date, end_date):
@@ -37,48 +38,16 @@ def daterange(start_date, end_date):
         yield start_date + timedelta(n)
 
 # calls the specific service for all the dates in the range and retrieves the data
-def get_data(start_date,end_date,type):
+def start_service(dateCouple,type):
     data = []
-    for single_date in daterange(start_date, end_date):
-        # #max number of atempts
+    for single_date in dateCouple.dateRange():
+        #max number of atempts
         retries = 5
-        #fix for date format to RFC3339
-        iso_date = single_date.isoformat().replace('+00:00','Z')
-        while True:
+        caching = True
+        while caching:
             try:
-                ready = False
-                single_date_str = single_date.strftime("%y-%m-%d")
-                cached_temps = cache.hexists(temperatureList,single_date_str)
-                cached_speeds = cache.hexists(northSpeedList,single_date_str)
-                if cached_temps and (type == 'temps' or type == 'both'):
-                    #reading temp from cache
-                    temp = json.loads(cache.hget(temperatureList,single_date_str))
-                    ready = True
-                elif not cached_temps and (type == 'temps' or type == 'both'):
-                    #calling the backing service and caching values for that date
-                    service = 'http://temperature:8000/?at='
-                    url = service + iso_date
-                    response = requests.get(url)
-                    temp = response.json().get('temp')
-                    cache.hsetnx(temperatureList,single_date_str,temp)
-                    ready = True
-                if cached_speeds and (type == 'speeds' or type == 'both'):
-                    #reading speeds from cache
-                    north = json.loads(cache.hget(northSpeedList,single_date_str))
-                    west = json.loads(cache.hget(westSpeedList,single_date_str))
-                    ready = True
-                elif not cached_speeds and (type == 'speeds' or type == 'both'):
-                    #calling the backing service and caching values for that date
-                    service = 'http://windspeed:8080/?at='
-                    url = service + iso_date
-                    response = requests.get(url)
-                    north = response.json().get('north')
-                    west = response.json().get('west')
-                    cache.hsetnx(northSpeedList,single_date_str,north)
-                    cache.hsetnx(westSpeedList,single_date_str,west)
-                    ready = True
-                if ready:
-                    break
+                dataSet = createDataSet(single_date,type)
+                caching = False
             except redis.exceptions.ConnectionError as exc:
                 if retries == 0:
                     #trigger exception if not able to connect to redis after 5 atempts
@@ -88,72 +57,66 @@ def get_data(start_date,end_date,type):
             except Exception as e:
                 ermsg = "Unexpected error: " + str(e)
                 return jsonify({'error':ermsg})
-        if type == 'temps':
-            data.append({'temp':temp,'date':iso_date})
-        elif type == 'speeds':
-            data.append({'north':north,'west':west,'date':iso_date})
-        else:
-            data.append({'north':north,'west':west,'temp':temp,'date':iso_date})
+            data.append(dataSet.getData())
     return jsonify(data)
 
-# checks start_date and end_date parameters before calling get_data to prevent errors with 
-def start_service(start_date_str, end_date_str, type):
-    #checking start_date and end_date are defined
-    if start_date_str == '' or end_date_str == '':
-        return jsonify({'error':'missing parameter in request.(start & end parameters must be defined in the request)'})
-    
-    today_date_str = date.today().isoformat() + 'T00:00:00Z'
-    smallest_date_str = "1900-01-01T00:00:00Z"
-    
+#creates a DataSet from cached data and calls the backing services only when needed
+def createDataSet(single_date,type):
+    iso_date = single_date.isoformat().replace('+00:00','Z')
+    single_date_str = single_date.strftime("%y-%m-%d")
+    cached_temps = checkCache(single_date_str,'temps')
+    cached_speeds = checkCache(single_date_str,'speeds')
+    params = {'date':iso_date}
+    if (type == 'temps' or type == 'weather') and cached_temps:
+        #reading temps from cache
+        params['temp'] = json.loads(cache.hget(TEMPERATURES,single_date_str))
+    elif (type == 'temps' or type == 'weather') and not cached_temps:
+        #calling the backing service and caching values for that date
+        url = TEMPERATURE_SERVICE + iso_date
+        response = requests.get(url)
+        params['temp'] = response.json().get('temp')
+        cache.hsetnx(TEMPERATURES,single_date_str,params.get('temp'))
+    if (type == 'speeds' or type == 'weather') and cached_speeds:
+        #reading speeds from cache
+        params['north'] =  json.loads(cache.hget(NORTH_SPEEDS,single_date_str))
+        params['west'] =  json.loads(cache.hget(WEST_SPEEDS,single_date_str))
+    elif (type == 'speeds' or type == 'weather') and not cached_speeds:
+        #calling the backing service and caching values for that date
+        url = WINDSPEEDS_SERVICE + iso_date
+        response = requests.get(url)
+        params['north'] = response.json().get('north')
+        params['west'] = response.json().get('west')
+        cache.hsetnx(NORTH_SPEEDS,single_date_str,params.get('north'))
+        cache.hsetnx(WEST_SPEEDS,single_date_str,params.get('west'))
+    return DataSet(type,params)
+
+#checks if the service type was already cached for that date
+def checkCache(date_str,type):
+    if type == 'temps' and cache.hexists(TEMPERATURES,date_str):
+        return True
+    if type == 'speeds' and cache.hexists(NORTH_SPEEDS,date_str):
+        return True
+    return False
+
+# creates a DateCouple and start the service if there's no errors
+def start_request(args, type):
     try:
-        start_date = dateutil.parser.parse(start_date_str)
-        end_date = dateutil.parser.parse(end_date_str)
-        smallest_date = dateutil.parser.parse(smallest_date_str)
-        today_date = dateutil.parser.parse(today_date_str)
+        dateCouple = DateCouple(args.get('start',''),args.get('end',''))
+        return start_service(dateCouple,type)
     except Exception as e:
-        ermsg = "Error while parsing dates: " + str(e)
-        return jsonify({'error':ermsg})
-    
-    #checking start_date is greater than the smallest date
-    if smallest_date > start_date:
-        return jsonify({'error':'start date is older than jan 01 1900'})
-    #checking end_date is greater than the smallest date
-    if smallest_date > end_date:
-        return jsonify({'error':'end date is older than jan 01 1900'})
-    #checking start_date occurs before today
-    if start_date > today_date:
-        return jsonify({'error':'start date is in the future'})
-    #checking end_date occurs before today
-    if end_date > today_date:
-        return jsonify({'error':'end date is in the future'})
-    #checking end_date greater than start_date
-    if end_date < start_date:
-        return jsonify({'error':'start date must be smaller than the end date'})
-    return get_data(start_date,end_date,type)
+        return jsonify({'error':str(e)})
 
 class Temperatures(Resource):
     def get(self):
-        start_date_str = request.args.get('start','')
-        end_date_str = request.args.get('end','')
-        if fecth_date(start_date_str) and fecth_date(end_date_str):
-            return start_service(start_date_str,end_date_str,'temps')
-        return jsonify({'error':'each date must be in ISO8601 format'})
+        return start_request(request.args,'temps')
 
 class Speeds(Resource):
     def get(self):
-        start_date_str = request.args.get('start','')
-        end_date_str = request.args.get('end','')
-        if fecth_date(start_date_str) and fecth_date(end_date_str):
-            return start_service(start_date_str,end_date_str,'speeds')
-        return jsonify({'error':'each date must be in ISO8601 format'})
+        return start_request(request.args,'speeds')
 
 class Weather(Resource):
     def get(self):
-        start_date_str = request.args.get('start','')
-        end_date_str = request.args.get('end','')
-        if fecth_date(start_date_str) and fecth_date(end_date_str):
-            return start_service(start_date_str,end_date_str,'both')
-        return jsonify({'error':'each date must be in ISO8601 format'})
+        return start_request(request.args,'weather')
 
 api.add_resource(Temperatures, '/temperatures')
 api.add_resource(Speeds, '/speeds')
