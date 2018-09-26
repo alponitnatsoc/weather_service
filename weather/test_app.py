@@ -109,4 +109,5 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stderr)
     logging.getLogger("TestDateCouple").setLevel( logging.DEBUG )
     logging.getLogger("TestDataSet").setLevel( logging.DEBUG )
+    logging.getLogger("TestApp").setLevel( logging.DEBUG )
     unittest.main()
